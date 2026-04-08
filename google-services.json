@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1092523429710",
+    "project_id": "tutorial-college",
+    "storage_bucket": "tutorial-college.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1092523429710:android:a583d3dbe0acf4bede581f",
+        "android_client_info": {
+          "package_name": "smart.academy"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDlRtvBDRRNFjej_kSE78NHwfH5z4mE6Kw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
