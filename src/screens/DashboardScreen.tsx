@@ -27,7 +27,9 @@ import {
   User,
   History,
   TrendingUp,
-  Award
+  Award,
+  Layers,
+  Check
 } from 'lucide-react-native';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -45,18 +47,20 @@ const DashboardScreen = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [todayClasses, setTodayClasses] = useState<any[]>([]);
   const [stats, setStats] = useState({
-    attendance: '0%',
-    daysThisMonth: 0,
-    weeklyAvg: 0
+    totalStudents: 0,
+    activeClasses: 0,
+    pendingAttendance: 0
   });
 
-  const fetchTodayClasses = async () => {
+  const fetchDashboardData = async () => {
     if (!teacherData?.id) return;
     setLoading(true);
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
       const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
       const dayOfWeek = days[new Date().getDay()];
 
+      // 1. Fetch all teacher classes
       const q = query(
         collection(db, "classes"), 
         where("teacherId", "==", teacherData.id),
@@ -64,21 +68,23 @@ const DashboardScreen = () => {
       );
       
       const snap = await getDocs(q);
-      const classes: any[] = [];
-      let totalWeeklySessions = 0;
+      const allTeacherClasses: any[] = [];
+      let totalStudentsCount = 0;
       
       snap.docs.forEach(doc => {
         const cls = doc.data();
+        totalStudentsCount += (cls.studentCount || 0);
+        
         const schedules = cls.schedules || [];
-        totalWeeklySessions += schedules.length;
-
         const todaySlots = schedules.filter((s: any) => s.dayOfWeek.toLowerCase() === dayOfWeek);
+        
         todaySlots.forEach((slot: any) => {
-          classes.push({
+          allTeacherClasses.push({
             id: doc.id,
             name: cls.name,
             subject: cls.subject,
             grade: cls.grade,
+            studentCount: cls.studentCount || 0,
             startTime: slot.startTime,
             endTime: slot.endTime,
             room: slot.room || "Room 01"
@@ -86,71 +92,49 @@ const DashboardScreen = () => {
         });
       });
 
-      setTodayClasses(classes.sort((a, b) => a.startTime.localeCompare(b.startTime)));
-      
-      // Fetch Attendance Stats
-      await fetchAttendanceStats(teacherData.id, totalWeeklySessions);
+      // 2. Fetch today's attendance logs to check compliance
+      const attendanceQ = query(
+        collection(db, "attendance"),
+        where("date", "==", todayStr),
+        where("teacherId", "==", teacherData.id)
+      );
+      const attSnap = await getDocs(attendanceQ);
+      const markedClassIds = attSnap.docs.map(d => d.data().classId);
+
+      // 3. Map status to today's classes
+      const mappedClasses = allTeacherClasses.map(cls => ({
+        ...cls,
+        isCompleted: markedClassIds.includes(cls.id)
+      })).sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+      setTodayClasses(mappedClasses);
+
+      // 4. Update Stats (Mirroring Web App)
+      setStats({
+        totalStudents: totalStudentsCount,
+        activeClasses: snap.docs.length,
+        pendingAttendance: mappedClasses.filter(c => !c.isCompleted).length
+      });
+
     } catch (error) {
-      console.error("Dashboard Load Error:", error);
+      console.error("Dashboard Sync Error:", error);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
 
-  const fetchAttendanceStats = async (teacherId: string, weeklySessions: number) => {
-    try {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      
-      const q = query(
-        collection(db, "attendance"),
-        where("teacherId", "==", teacherId),
-        where("createdAt", ">=", thirtyDaysAgo)
-      );
-      
-      const snap = await getDocs(q);
-      const records = snap.docs.map(d => d.data());
-      
-      // Calculate Avg Attendance %
-      let totalPercent = 0;
-      records.forEach(rec => {
-        const studentRecords = rec.records || {};
-        const total = Object.keys(studentRecords).length;
-        const present = Object.values(studentRecords).filter(v => v).length;
-        if (total > 0) totalPercent += (present / total) * 100;
-      });
-      
-      const avgAttendance = records.length > 0 ? Math.round(totalPercent / records.length) : 0;
-      
-      // Calculate unique days taught this month
-      const now = new Date();
-      const uniqueDays = new Set(
-        records
-          .filter(rec => {
-            const date = rec.createdAt?.toDate ? rec.createdAt.toDate() : new Date();
-            return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
-          })
-          .map(rec => rec.date)
-      ).size;
-
-      setStats({
-        attendance: `${avgAttendance}%`,
-        daysThisMonth: uniqueDays,
-        weeklyAvg: weeklySessions
-      });
-    } catch (error) {
-      console.error("Stats Error:", error);
-    }
-  };
+  useEffect(() => {
+    fetchDashboardData();
+  }, [teacherData]);
 
   useEffect(() => {
-    fetchTodayClasses();
+    fetchDashboardData();
   }, [teacherData]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchTodayClasses();
+    fetchDashboardData();
   };
 
   const getGreeting = () => {
@@ -168,7 +152,7 @@ const DashboardScreen = () => {
     const upcoming = todayClasses.find(cls => {
       const [hours, minutes] = cls.startTime.split(':').map(Number);
       const classStartTime = hours * 60 + minutes;
-      return classStartTime > currentTime;
+      return classStartTime > currentTime && !cls.isCompleted;
     });
 
     return upcoming || null;
@@ -193,6 +177,10 @@ const DashboardScreen = () => {
         {/* Header Section */}
         <View style={styles.header}>
           <View>
+            <View style={styles.liveIndicator}>
+               <View style={styles.pulseDot} />
+               <Text style={styles.liveText}>TERMINAL STATUS: ACTIVE</Text>
+            </View>
             <Text style={styles.greeting}>{getGreeting()},</Text>
             <Text style={styles.teacherName}>{teacherData?.name?.split(' ')[0] || 'Teacher'}</Text>
           </View>
@@ -228,7 +216,7 @@ const DashboardScreen = () => {
             >
               <View style={styles.nextClassHeader}>
                 <View style={styles.nextBadge}>
-                  <Text style={styles.nextBadgeText}>NEXT SESSION</Text>
+                  <Text style={styles.nextBadgeText}>UPCOMING LOG</Text>
                 </View>
                 <View style={styles.timeBadge}>
                   <Clock size={12} color="#fff" style={{ marginRight: 4 }} />
@@ -240,12 +228,12 @@ const DashboardScreen = () => {
               <Text style={styles.nextClassSubject}>{nextClass.subject} • {nextClass.grade}</Text>
               
               <View style={styles.nextClassFooter}>
-                <View style={styles.locationContainer}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <MapPin size={14} color="rgba(255,255,255,0.7)" />
                   <Text style={styles.nextClassRoom}>{nextClass.room}</Text>
                 </View>
                 <View style={styles.actionButton}>
-                  <Text style={styles.actionButtonText}>Start Attendance</Text>
+                  <Text style={styles.actionButtonText}>Log Session</Text>
                   <ArrowRight size={16} color="#fff" />
                 </View>
               </View>
@@ -257,32 +245,32 @@ const DashboardScreen = () => {
         <View style={styles.statsRow}>
           <View style={[styles.statItem, { backgroundColor: '#F0F9FF' }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#BAe6FD' }]}>
-              <BookOpen size={20} color="#0369A1" />
+              <Users size={20} color="#0369A1" />
             </View>
-            <Text style={styles.statNumber}>{todayClasses.length}</Text>
-            <Text style={styles.statTitle}>Today</Text>
+            <Text style={styles.statNumber}>{stats.totalStudents}</Text>
+            <Text style={styles.statTitle}>Network Reach</Text>
           </View>
           
           <View style={[styles.statItem, { backgroundColor: '#F0FDF4' }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#BBF7D0' }]}>
-              <ClipboardCheck size={20} color="#15803D" />
+              <Layers size={20} color="#15803D" />
             </View>
-            <Text style={styles.statNumber}>{stats.attendance}</Text>
-            <Text style={styles.statTitle}>Avg Attendance</Text>
+            <Text style={styles.statNumber}>{stats.activeClasses}</Text>
+            <Text style={styles.statTitle}>Active Matrix</Text>
           </View>
 
           <View style={[styles.statItem, { backgroundColor: '#FEF2F2' }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#FECACA' }]}>
-              <TrendingUp size={20} color="#B91C1C" />
+              <ClipboardCheck size={20} color="#B91C1C" />
             </View>
-            <Text style={styles.statNumber}>{stats.weeklyAvg}</Text>
-            <Text style={styles.statTitle}>Per Week</Text>
+            <Text style={styles.statNumber}>{stats.pendingAttendance}</Text>
+            <Text style={styles.statTitle}>Compliance</Text>
           </View>
         </View>
 
         {/* Quick Actions */}
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>QUICK ACTIONS</Text>
+          <Text style={styles.sectionTitle}>SYSTEM PROTOCOLS</Text>
         </View>
         
         <ScrollView 
@@ -324,7 +312,7 @@ const DashboardScreen = () => {
 
         {/* Schedule Section */}
         <View style={[styles.sectionHeader, { marginTop: 24 }]}>
-          <Text style={styles.sectionTitle}>TODAY'S SCHEDULE</Text>
+          <Text style={styles.sectionTitle}>DAILY TERMINAL TIMELINE</Text>
           <View style={styles.countBadge}>
             <Text style={styles.countBadgeText}>{todayClasses.length}</Text>
           </View>
@@ -335,19 +323,18 @@ const DashboardScreen = () => {
             <View style={styles.emptyIconContainer}>
               <Calendar size={40} color="#94A3B8" />
             </View>
-            <Text style={styles.emptyTitle}>No Classes Today</Text>
-            <Text style={styles.emptySubtitle}>Enjoy your day off or check your upcoming schedule.</Text>
+            <Text style={styles.emptyTitle}>Registry Empty Today</Text>
+            <Text style={styles.emptySubtitle}>No primary units are scheduled for this terminal day.</Text>
             <TouchableOpacity style={styles.refreshButton} onPress={onRefresh}>
-               <Text style={styles.refreshButtonText}>Refresh</Text>
+               <Text style={styles.refreshButtonText}>Refresh Terminal</Text>
             </TouchableOpacity>
           </View>
         ) : (
           todayClasses.map((cls, idx) => {
-            const isNext = nextClass?.id === cls.id;
             return (
               <TouchableOpacity 
                 key={`${cls.id}-${idx}`} 
-                style={[styles.scheduleCard, isNext && styles.nextScheduleCard]}
+                style={[styles.scheduleCard, cls.isCompleted && { borderColor: '#E2E8F0', opacity: 0.8 }]}
                 onPress={() => navigation.navigate('MarkAttendance', { 
                   classId: cls.id, 
                   className: cls.name, 
@@ -363,7 +350,14 @@ const DashboardScreen = () => {
                 <View style={styles.divider} />
                 
                 <View style={styles.scheduleInfo}>
-                  <Text style={styles.scheduleName}>{cls.name}</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={styles.scheduleName}>{cls.name}</Text>
+                    {cls.isCompleted && (
+                      <View style={styles.completedBadge}>
+                        <Check size={10} color="#10B981" strokeWidth={4} />
+                      </View>
+                    )}
+                  </View>
                   <View style={styles.scheduleDetails}>
                     <Text style={styles.scheduleSubject}>{cls.subject}</Text>
                     <View style={styles.dot} />
@@ -376,7 +370,11 @@ const DashboardScreen = () => {
                 </View>
 
                 <View style={styles.scheduleAction}>
-                  <ChevronRight size={20} color="#CBD5E1" />
+                  {cls.isCompleted ? (
+                    <Text style={styles.doneText}>LOGGED</Text>
+                  ) : (
+                    <ChevronRight size={20} color="#6366F1" />
+                  )}
                 </View>
               </TouchableOpacity>
             );
@@ -440,6 +438,40 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 20,
     fontWeight: '700',
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    marginBottom: 8,
+    alignSelf: 'flex-start',
+    gap: 6,
+  },
+  pulseDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#6366F1',
+  },
+  liveText: {
+    fontSize: 8,
+    fontWeight: '900',
+    color: '#6366F1',
+    letterSpacing: 1,
+  },
+  completedBadge: {
+    padding: 4,
+    backgroundColor: '#ECFDF5',
+    borderRadius: 8,
+  },
+  doneText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#10B981',
+    letterSpacing: 1,
   },
   nextClassContainer: {
     marginBottom: 30,
