@@ -6,6 +6,7 @@ import { doc, getDoc } from 'firebase/firestore';
 interface AuthContextType {
   user: User | null;
   teacherData: any | null;
+  isAdmin: boolean;
   loading: boolean;
   signOut: () => Promise<void>;
 }
@@ -15,6 +16,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [teacherData, setTeacherData] = useState<any | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -25,12 +27,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const teacherDoc = await getDoc(doc(db, 'teachers', firebaseUser.uid));
           if (teacherDoc.exists()) {
             setTeacherData({ id: teacherDoc.id, ...teacherDoc.data() });
+            setIsAdmin(false);
+          } else {
+            setTeacherData(null);
+            setIsAdmin(true); // Treat as admin if logged in but not a teacher
           }
         } catch (error) {
           console.error("Error fetching teacher data:", error);
+          setIsAdmin(false);
         }
       } else {
         setTeacherData(null);
+        setIsAdmin(false);
       }
       setLoading(false);
     });
@@ -43,7 +51,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, teacherData, loading, signOut }}>
+    <AuthContext.Provider value={{ user, teacherData, isAdmin, loading, signOut }}>
       {children}
     </AuthContext.Provider>
   );

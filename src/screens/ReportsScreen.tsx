@@ -11,7 +11,7 @@ import {
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { BarChart2, TrendingUp, Users, Calendar, ChevronLeft, Award } from 'lucide-react-native';
+import { BarChart2, TrendingUp, Users, Calendar as CalendarIcon, ChevronLeft, Award } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 
@@ -25,7 +25,10 @@ const ReportsScreen = () => {
   const [classStats, setClassStats] = useState<any[]>([]);
 
   const fetchReports = async () => {
-    if (!teacherData?.id) return;
+    if (!teacherData?.id) {
+        setLoading(false);
+        return;
+    }
     setLoading(true);
     try {
       // Fetch all attendance for this teacher
@@ -93,7 +96,10 @@ const ReportsScreen = () => {
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <ChevronLeft size={24} color="#64748B" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Academic Reports</Text>
+        <View>
+            <Text style={styles.headerTitle}>Compliance Audit</Text>
+            <Text style={styles.headerSubtitle}>ACADEMIC LOGS & ANALYTICS</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -113,7 +119,7 @@ const ReportsScreen = () => {
 
         <View style={styles.sectionHeader}>
           <BarChart2 size={18} color="#64748B" />
-          <Text style={styles.sectionTitle}>CLASS-WISE PERFORMANCE</Text>
+          <Text style={styles.sectionTitle}>COHORT COMPLIANCE MATRIX</Text>
         </View>
 
         {classStats.length === 0 ? (
@@ -182,6 +188,13 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#0F172A',
   },
+  headerSubtitle: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#6366F1',
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+  },
   scrollContent: {
     padding: 20,
   },
@@ -248,10 +261,15 @@ const styles = StyleSheet.create({
   classStatCard: {
     backgroundColor: '#fff',
     borderRadius: 24,
-    padding: 20,
+    padding: 24,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#F1F5F9',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.03,
+    shadowRadius: 10,
+    elevation: 2,
   },
   classInfo: {
     marginBottom: 20,

@@ -12,16 +12,26 @@ import {
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { Users, Search, ChevronRight, ChevronLeft, Phone, BookOpen, Layers } from 'lucide-react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { 
+  Users, 
+  Search, 
+  ChevronRight, 
+  ChevronLeft, 
+  Phone, 
+  BookOpen, 
+  Layers,
+  Plus
+} from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width } = Dimensions.get('window');
 
 const StudentsScreen = () => {
-  const { teacherData } = useAuth();
+  const { teacherData, isAdmin, user } = useAuth();
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   
   const [loading, setLoading] = useState(true);
   const [classes, setClasses] = useState<any[]>([]);
@@ -30,49 +40,41 @@ const StudentsScreen = () => {
   const [searchQuery, setSearchQuery] = useState('');
 
   const fetchData = async () => {
-    if (!teacherData?.id) return;
     setLoading(true);
     try {
-      // 1. Get all classes for this teacher
-      const classesQ = query(
-        collection(db, "classes"),
-        where("teacherId", "==", teacherData.id)
-      );
-      const classesSnap = await getDocs(classesQ);
-      const classesList = classesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setClasses(classesList);
-      
-      if (classesList.length > 0) {
-        setActiveTab(classesList[0].id);
+      if (isAdmin) {
+        // Admin sees all students
+        const studentsSnap = await getDocs(collection(db, "students"));
+        const studentsList = studentsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
+        setStudents(studentsList.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+        
+        // Fetch all classes as cohorts for filtering
+        const classesSnap = await getDocs(collection(db, "classes"));
+        const classesList = classesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setClasses(classesList);
+        if (classesList.length > 0) setActiveTab(classesList[0].id);
+      } else if (teacherData?.id) {
+        // Teacher sees only their cohorts
+        const classesQ = query(collection(db, "classes"), where("teacherId", "==", teacherData.id));
+        const classesSnap = await getDocs(classesQ);
+        const classesList = classesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        setClasses(classesList);
+        if (classesList.length > 0) setActiveTab(classesList[0].id);
+
+        const grades = Array.from(new Set(classesList.map((c: any) => c.grade)));
+        if (grades.length > 0) {
+            const allStudents: any[] = [];
+            for (const grade of grades) {
+                const q = query(collection(db, "students"), where("grade", "==", grade));
+                const snap = await getDocs(q);
+                snap.docs.forEach(doc => allStudents.push({ id: doc.id, ...doc.data() }));
+            }
+            const unique = Array.from(new Map(allStudents.map(s => [s.id, s])).values());
+            setStudents(unique.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+        }
       }
-
-      // 2. Get unique grades from classes
-      const grades = Array.from(new Set(classesList.map((c: any) => c.grade)));
-
-      if (grades.length === 0) {
-        setStudents([]);
-        setLoading(false);
-        return;
-      }
-
-      // 3. Fetch students in those grades
-      const allStudents: any[] = [];
-      for (const grade of grades) {
-        const studentsQ = query(
-          collection(db, "students"),
-          where("grade", "==", grade)
-        );
-        const studentsSnap = await getDocs(studentsQ);
-        studentsSnap.docs.forEach(doc => {
-          allStudents.push({ id: doc.id, ...doc.data() });
-        });
-      }
-
-      // De-duplicate students
-      const uniqueStudents = Array.from(new Map(allStudents.map(s => [s.id, s])).values());
-      setStudents(uniqueStudents.sort((a, b) => a.name.localeCompare(b.name)));
     } catch (error) {
-      console.error("Data Load Error:", error);
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -112,8 +114,8 @@ const StudentsScreen = () => {
           <ChevronLeft size={24} color="#64748B" />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>Student Directory</Text>
-          <Text style={styles.headerSubtitle}>{classes.length} ACTIVE SUBJECTS</Text>
+          <Text style={styles.headerTitle}>Master Directory</Text>
+          <Text style={styles.headerSubtitle}>{classes.length} ACTIVE COHORTS</Text>
         </View>
       </View>
 
@@ -160,7 +162,7 @@ const StudentsScreen = () => {
           <View style={styles.listHeader}>
              <Layers size={14} color="#6366F1" />
              <Text style={styles.listTitle}>
-               {activeClass?.subject} Students ({filteredStudents.length})
+               {activeClass?.subject} Cohort ({filteredStudents.length} Entities)
              </Text>
           </View>
 
@@ -171,30 +173,45 @@ const StudentsScreen = () => {
             </View>
           ) : (
             filteredStudents.map((s) => (
-              <View key={s.id} style={styles.studentCard}>
-                <View style={styles.studentAvatar}>
-                  <Text style={styles.avatarText}>{s.name.charAt(0)}</Text>
-                </View>
-                
-                <View style={styles.studentInfo}>
-                  <Text style={styles.studentName}>{s.name}</Text>
-                  <Text style={styles.schoolText}>{s.schoolName}</Text>
+                <TouchableOpacity 
+                  key={s.id}
+                  style={styles.studentCard}
+                  onPress={() => (navigation as any).navigate('StudentProfile', { studentId: s.id })}
+                >
+                  <LinearGradient
+                    colors={['#6366F1', '#4F46E5']}
+                    style={styles.studentAvatar}
+                  >
+                    <Text style={styles.avatarText}>{s.name.charAt(0)}</Text>
+                  </LinearGradient>
                   
-                  <View style={styles.contactRow}>
-                    <Phone size={10} color="#94A3B8" />
-                    <Text style={styles.contactText}>{s.parentPhone || 'No contact info'}</Text>
+                  <View style={styles.studentInfo}>
+                    <Text style={styles.studentName}>{s.name}</Text>
+                    <Text style={styles.schoolText}>{s.schoolName}</Text>
+                    
+                    <View style={styles.contactRow}>
+                      <Phone size={10} color="#94A3B8" />
+                      <Text style={styles.contactText}>{s.parentPhone || 'No contact info'}</Text>
+                    </View>
                   </View>
-                </View>
-                
-                <TouchableOpacity style={styles.actionButton}>
-                  <ChevronRight size={20} color="#CBD5E1" />
+                  
+                  <View style={styles.actionButton}>
+                    <ChevronRight size={20} color="#CBD5E1" />
+                  </View>
                 </TouchableOpacity>
-              </View>
             ))
           )}
           <View style={{ height: 40 }} />
         </ScrollView>
       </View>
+
+      {isAdmin && (
+        <TouchableOpacity style={styles.fab} onPress={() => (navigation as any).navigate('ManageStudent', {})}>
+           <LinearGradient colors={['#0F172A', '#1E293B']} style={styles.fabGradient}>
+              <Plus size={24} color="#fff" />
+           </LinearGradient>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -334,21 +351,21 @@ const styles = StyleSheet.create({
     borderColor: '#F1F5F9',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.02,
-    shadowRadius: 10,
+    shadowOpacity: 0.04,
+    shadowRadius: 15,
+    elevation: 3,
   },
   studentAvatar: {
     width: 60,
     height: 60,
     borderRadius: 20,
-    backgroundColor: '#EEF2FF',
     justifyContent: 'center',
     alignItems: 'center',
   },
   avatarText: {
     fontSize: 22,
     fontWeight: '900',
-    color: '#6366F1',
+    color: '#fff',
   },
   studentInfo: {
     flex: 1,
@@ -390,6 +407,23 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     marginTop: 16,
     textAlign: 'center',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 30,
+    right: 30,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  fabGradient: {
+    width: 64,
+    height: 64,
+    borderRadius: 22,
+    justifyContent: 'center',
+    alignItems: 'center',
   }
 });
 

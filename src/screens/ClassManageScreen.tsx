@@ -14,10 +14,11 @@ import {
 import { doc, getDoc, collection, query, getDocs, orderBy, serverTimestamp, writeBatch, increment } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { ChevronLeft, Plus, Trash2, Clock, MapPin, Save, BookOpen, CreditCard, ChevronDown } from 'lucide-react-native';
+import { ChevronLeft, Plus, Trash2, Clock, MapPin, Save, BookOpen, CreditCard, ChevronDown, Calendar as CalendarIcon } from 'lucide-react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
@@ -25,11 +26,15 @@ const ClassManageScreen = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'ManageClass'>>();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const { teacherData } = useAuth();
-  const { classId } = route.params;
+  const { teacherData, isAdmin } = useAuth();
+  const { classId, teacherId: paramTeacherId, teacherName: paramTeacherName } = route.params;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  
+  // Resolve Target Faculty (Param > Auth)
+  const targetTeacherId = paramTeacherId || teacherData?.id || "";
+  const targetTeacherName = paramTeacherName || teacherData?.name || "Teacher";
   
   // Data lists
   const [grades, setGrades] = useState<any[]>([]);
@@ -38,11 +43,15 @@ const ClassManageScreen = () => {
 
   // Form State
   const [name, setName] = useState('');
+  const [groupSuffix, setGroupSuffix] = useState('');
   const [subjectId, setSubjectId] = useState('');
   const [gradeId, setGradeId] = useState('');
   const [monthlyFee, setMonthlyFee] = useState('0');
   const [schedules, setSchedules] = useState<any[]>([]);
   const [status, setStatus] = useState<'active' | 'inactive'>('active');
+  const [syllabusCompleted, setSyllabusCompleted] = useState(false);
+  const [sessionsPerCycle, setSessionsPerCycle] = useState('8');
+  const [completedSessions, setCompletedSessions] = useState(0);
 
   useEffect(() => {
     const loadRegistry = async () => {
@@ -69,6 +78,9 @@ const ClassManageScreen = () => {
             setMonthlyFee(String(data.monthlyFee || '0'));
             setSchedules(data.schedules || []);
             setStatus(data.status || 'active');
+            setSyllabusCompleted(data.syllabusCompleted || false);
+            setSessionsPerCycle(String(data.sessionsPerCycle || '8'));
+            setCompletedSessions(data.completedSessions || 0);
           }
         } else {
           setSchedules([{ dayOfWeek: 'Monday', startTime: '08:00', endTime: '10:00', room: 'Room 01' }]);
@@ -85,14 +97,15 @@ const ClassManageScreen = () => {
 
   // Auto-generate class name
   useEffect(() => {
-    if (gradeId && subjectId && teacherData?.name) {
+    if (gradeId && subjectId && targetTeacherName) {
       const g = grades.find(x => x.id === gradeId);
       const s = subjects.find(x => x.id === subjectId);
       if (g && s) {
-        setName(`${g.name} • ${s.name} (${teacherData.name})`);
+        const suffix = groupSuffix.trim() ? ` - ${groupSuffix.trim()}` : "";
+        setName(`${g.name} • ${s.name}${suffix} (${targetTeacherName})`);
       }
     }
-  }, [gradeId, subjectId, teacherData, grades, subjects]);
+  }, [gradeId, subjectId, targetTeacherName, grades, subjects, groupSuffix]);
 
   const addSchedule = () => {
     setSchedules([...schedules, { dayOfWeek: 'Monday', startTime: '08:00', endTime: '10:00', room: 'Room 01' }]);
@@ -137,10 +150,84 @@ const ClassManageScreen = () => {
     }
 
     setSaving(true);
-    const batch = writeBatch(db);
     try {
+      // 1. Fetch fresh data for conflict validation
+      const classesSnap = await getDocs(collection(db, "classes"));
+      const currentClasses = classesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() as any }));
+
       const selectedSubject = subjects.find(s => s.id === subjectId);
       const selectedGrade = grades.find(g => g.id === gradeId);
+
+      const hasOverlap = (s1: string, e1: string, s2: string, e2: string) => {
+          return s1 < e2 && s2 < e1;
+      };
+
+      // Case 0: Internal Conflict Prevention (within the same new class)
+      for (let i = 0; i < schedules.length; i++) {
+        for (let j = i + 1; j < schedules.length; j++) {
+            const slot1 = schedules[i];
+            const slot2 = schedules[j];
+            if (slot1.dayOfWeek.toLowerCase() === slot2.dayOfWeek.toLowerCase()) {
+                if (hasOverlap(slot1.startTime, slot1.endTime, slot2.startTime, slot2.endTime)) {
+                    Alert.alert('Scheduling Error', `Local Overlap: Slots ${i + 1} and ${j + 1} conflict on ${slot1.dayOfWeek}.`);
+                    setSaving(false);
+                    return;
+                }
+            }
+        }
+      }
+
+      // Case 1: Identical Name Check
+      for (const existing of currentClasses) {
+          if (classId && existing.id === classId) continue;
+          if (existing.name.toLowerCase() === name.toLowerCase()) {
+              Alert.alert('Protocol Conflict', `A session already exists with the exact same identifier: "${existing.name}". Please use a Group Suffix to distinguish parallel cohorts.`);
+              setSaving(false);
+              return;
+          }
+
+          // Case 2-4: Schedule Conflicts
+          if (existing.status !== 'active') continue;
+          for (const newSlot of schedules) {
+            for (const existingSlot of (existing.schedules || [])) {
+              if (newSlot.dayOfWeek.toLowerCase() === existingSlot.dayOfWeek.toLowerCase()) {
+                if (hasOverlap(newSlot.startTime, newSlot.endTime, existingSlot.startTime, existingSlot.endTime)) {
+                   // Room Conflict
+                   if (newSlot.room.trim().toLowerCase() === existingSlot.room.trim().toLowerCase()) {
+                     Alert.alert('Room Occupied', `${newSlot.room} is used by "${existing.name}" on ${newSlot.dayOfWeek} at ${existingSlot.startTime}-${existingSlot.endTime}`);
+                     setSaving(false);
+                     return;
+                   }
+                   // Teacher Conflict
+                   if (targetTeacherId === existing.teacherId) {
+                     Alert.alert('Faculty Conflict', `${targetTeacherName} is already assigned to "${existing.name}" on ${newSlot.dayOfWeek} at ${existingSlot.startTime}-${existingSlot.endTime}`);
+                     setSaving(false);
+                     return;
+                   }
+                   // Grade Conflict
+                   if (gradeId === existing.gradeId) {
+                     Alert.alert('Grade Overlap', `${selectedGrade?.name || 'This grade'} already has "${existing.name}" scheduled at this time.`);
+                     setSaving(false);
+                     return;
+                   }
+                }
+              }
+            }
+          }
+      }
+
+      const batch = writeBatch(db);
+
+      // Sort schedules chronologically before saving
+      const sortedSchedules = [...schedules].sort((a, b) => {
+          const dayOrder: Record<string, number> = { 
+              "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, 
+              "friday": 4, "saturday": 5, "sunday": 6 
+          };
+          const dayCompare = dayOrder[a.dayOfWeek.toLowerCase()] - dayOrder[b.dayOfWeek.toLowerCase()];
+          if (dayCompare !== 0) return dayCompare;
+          return (a.startTime || "").localeCompare(b.startTime || "");
+      });
 
       const classData = {
         name,
@@ -148,11 +235,13 @@ const ClassManageScreen = () => {
         subject: selectedSubject?.name || "",
         gradeId,
         grade: selectedGrade?.name || "",
-        teacherId: teacherData.id,
-        teacherName: teacherData.name,
+        teacherId: targetTeacherId,
+        teacherName: targetTeacherName,
         monthlyFee: Number(monthlyFee),
+        sessionsPerCycle: Number(sessionsPerCycle),
         status,
-        schedules,
+        syllabusCompleted,
+        schedules: sortedSchedules,
         updatedAt: serverTimestamp()
       };
 
@@ -201,18 +290,25 @@ const ClassManageScreen = () => {
         <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
           <ChevronLeft size={24} color="#64748B" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{classId ? 'Adjust Schedule' : 'Schedule New Class'}</Text>
+        <View style={styles.headerInfo}>
+          <Text style={styles.headerTitle}>{classId ? 'Adjustment Protocol' : 'Unit Registration'}</Text>
+          {classId && (
+            <TouchableOpacity onPress={() => (navigation as any).navigate('ClassSessions', { classId, className: name })}>
+              <Text style={styles.historyLink}>LEDGER LOGS</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>CURRICULUM SETUP</Text>
+            <Text style={styles.sectionLabel}>UNIT IDENTITY</Text>
             <BookOpen size={16} color="#94A3B8" />
           </View>
           
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Class Display Name (Identity)</Text>
+            <Text style={styles.inputLabel}>Unit Identifier</Text>
             <View style={[styles.input, { backgroundColor: '#F1F5F9', borderBottomColor: '#E2E8F0' }]}>
               <Text style={{ color: '#64748B', fontWeight: '800' }}>{name || "Pick Grade and Subject First..."}</Text>
             </View>
@@ -259,23 +355,85 @@ const ClassManageScreen = () => {
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.inputLabel}>Monthly Fee (LKR)</Text>
-            <View style={styles.feeInput}>
-              <CreditCard size={18} color="#94A3B8" />
-              <TextInput 
-                style={styles.textInput} 
-                keyboardType="numeric"
-                value={monthlyFee}
-                onChangeText={setMonthlyFee}
-                placeholder="2500"
-              />
+            <Text style={styles.inputLabel}>Group / Section ID (Optional)</Text>
+            <TextInput 
+              style={styles.textInput} 
+              value={groupSuffix}
+              onChangeText={setGroupSuffix}
+              placeholder="e.g. Group A, Evening Bat"
+              autoCapitalize="words"
+            />
+          </View>
+
+          <View style={styles.row}>
+            <View style={[styles.inputGroup, { flex: 1, marginRight: 12 }]}>
+              <Text style={styles.inputLabel}>Fiscal Rate (LKR)</Text>
+              <View style={styles.feeInput}>
+                <CreditCard size={18} color="#94A3B8" />
+                <TextInput 
+                  style={styles.textInput} 
+                  keyboardType="numeric"
+                  value={monthlyFee}
+                  onChangeText={setMonthlyFee}
+                  placeholder="2500"
+                />
+              </View>
+            </View>
+
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.inputLabel}>Sessions/Cycle</Text>
+              <View style={styles.feeInput}>
+                <CalendarIcon size={18} color="#94A3B8" />
+                <TextInput 
+                  style={styles.textInput} 
+                  keyboardType="numeric"
+                  value={sessionsPerCycle}
+                  onChangeText={setSessionsPerCycle}
+                  placeholder="8"
+                />
+              </View>
             </View>
           </View>
         </View>
 
         <View style={styles.section}>
           <View style={styles.sectionHeaderRow}>
-            <Text style={styles.sectionLabel}>TIMING & LOCATION</Text>
+            <Text style={styles.sectionLabel}>OPERATIONAL STATUS</Text>
+            <Layers size={16} color="#94A3B8" />
+          </View>
+          
+          <View style={styles.metricsRow}>
+            <View style={styles.metricCard}>
+              <Text style={styles.metricVal}>{completedSessions}</Text>
+              <Text style={styles.metricLab}>SESSIONS LOGGED</Text>
+            </View>
+            <View style={styles.statusToggleContainer}>
+               <TouchableOpacity 
+                style={[styles.statusToggle, status === 'active' ? styles.statusActive : styles.statusInactive]}
+                onPress={() => setStatus(status === 'active' ? 'inactive' : 'active')}
+               >
+                 <Text style={styles.statusToggleText}>{status === 'active' ? 'UNIT ACTIVE' : 'UNIT SUSPENDED'}</Text>
+               </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity 
+            style={[styles.syllabusCard, syllabusCompleted && styles.syllabusCardActive]}
+            onPress={() => setSyllabusCompleted(!syllabusCompleted)}
+          >
+            <View style={styles.syllabusInfo}>
+               <Text style={[styles.syllabusTitle, syllabusCompleted && styles.syllabusTitleActive]}>Syllabus Completion</Text>
+               <Text style={styles.syllabusSub}>Archive class in yearly focus</Text>
+            </View>
+            <View style={[styles.syllabusToggle, syllabusCompleted && styles.syllabusToggleActive]}>
+               {syllabusCompleted && <View style={styles.toggleDot} />}
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.section}>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>SCHEDULING PROTOCOL</Text>
             <TouchableOpacity style={styles.addButton} onPress={addSchedule}>
               <Plus size={16} color="#6366F1" />
               <Text style={styles.addButtonText}>ADD SLOT</Text>
@@ -351,18 +509,20 @@ const ClassManageScreen = () => {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Platform.OS === 'ios' ? 40 : 20 }]}>
-         <TouchableOpacity 
-          style={styles.saveButton} 
-          onPress={handleSave}
-          disabled={saving}
-         >
+        <View style={styles.saveButtonContainer}>
+          <TouchableOpacity 
+            style={[styles.saveButton, { backgroundColor: '#0F172A' }]} 
+            onPress={handleSave} 
+            disabled={saving}
+          >
             {saving ? <ActivityIndicator color="#fff" /> : (
               <>
-                <Text style={styles.saveButtonText}>{classId ? 'COMMIT ADJUSTMENTS' : 'AUTHORIZE CLASS'}</Text>
-                <Save size={20} color="#fff" />
+                <Save size={18} color="#fff" />
+                <Text style={styles.saveButtonText}>{classId ? 'FINALIZE ADJUSTMENT' : 'AUTHORIZE REGISTRATION'}</Text>
               </>
             )}
-         </TouchableOpacity>
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -391,6 +551,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#F1F5F9',
     marginRight: 20,
+  },
+  headerInfo: {
+    flex: 1,
+  },
+  historyLink: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#6366F1',
+    letterSpacing: 1,
+    marginTop: 4,
   },
   headerTitle: {
     fontSize: 18,
@@ -584,7 +754,6 @@ const styles = StyleSheet.create({
     borderColor: '#F1F5F9',
   },
   saveButton: {
-    backgroundColor: '#0F172A',
     height: 60,
     borderRadius: 20,
     flexDirection: 'row',
@@ -601,7 +770,110 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
     letterSpacing: 1,
-  }
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  metricCard: {
+    flex: 1,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+    alignItems: 'center',
+  },
+  metricVal: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  metricLab: {
+    fontSize: 8,
+    fontWeight: '800',
+    color: '#94A3B8',
+    marginTop: 4,
+    letterSpacing: 1,
+  },
+  statusToggleContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  statusToggle: {
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  statusActive: {
+    backgroundColor: '#F0FDF4',
+    borderColor: '#BBF7D0',
+  },
+  statusInactive: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FECACA',
+  },
+  statusToggleText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#1E293B',
+    letterSpacing: 1,
+  },
+  syllabusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#fff',
+    padding: 20,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  syllabusCardActive: {
+    backgroundColor: '#F0F9FF',
+    borderColor: '#BAE6FD',
+  },
+  syllabusInfo: {
+    flex: 1,
+  },
+  syllabusTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  syllabusTitleActive: {
+    color: '#0369A1',
+  },
+  syllabusSub: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  syllabusToggle: {
+    width: 44,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#E2E8F0',
+    padding: 2,
+    justifyContent: 'center',
+  },
+  syllabusToggleActive: {
+    backgroundColor: '#0EA5E9',
+    alignItems: 'flex-end',
+  },
+  toggleDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+  },
 });
 
 export default ClassManageScreen;

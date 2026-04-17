@@ -5,14 +5,14 @@ import {
   StyleSheet, 
   ScrollView, 
   TouchableOpacity, 
-  ActivityIndicator,
-  RefreshControl,
-  Alert
+  ActivityIndicator, 
+  RefreshControl, 
+  Alert 
 } from 'react-native';
 import { doc, updateDoc, deleteDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { Calendar, Clock, MapPin, ChevronRight, BookOpen, Plus, Trash2, Edit2 } from 'lucide-react-native';
+import { Calendar as CalendarIcon, Clock, MapPin, ChevronRight, BookOpen, Plus, Trash2, Edit2, ChevronLeft } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
@@ -21,7 +21,7 @@ import { RootStackParamList } from '../navigation/types';
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 const TimetableScreen = () => {
-  const { teacherData } = useAuth();
+  const { teacherData, isAdmin } = useAuth();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const [loading, setLoading] = useState(true);
@@ -29,14 +29,22 @@ const TimetableScreen = () => {
   const [schedule, setSchedule] = useState<Record<string, any[]>>({});
 
   const fetchSchedule = async () => {
-    if (!teacherData?.id) return;
     setLoading(true);
     try {
-      const q = query(
-        collection(db, "classes"), 
-        where("teacherId", "==", teacherData.id),
-        where("status", "==", "active")
-      );
+      let q;
+      if (isAdmin) {
+        q = query(collection(db, "classes"), where("status", "==", "active"));
+      } else {
+        if (!teacherData?.id) {
+           setLoading(false);
+           return;
+        }
+        q = query(
+          collection(db, "classes"), 
+          where("teacherId", "==", teacherData.id),
+          where("status", "==", "active")
+        );
+      }
       
       const snap = await getDocs(q);
       const weeklySchedule: Record<string, any[]> = {};
@@ -52,6 +60,7 @@ const TimetableScreen = () => {
               name: cls.name,
               subject: cls.subject,
               grade: cls.grade,
+              teacherName: cls.teacherName || "Teacher",
               startTime: slot.startTime,
               endTime: slot.endTime,
               room: slot.room || "Room 01"
@@ -60,7 +69,6 @@ const TimetableScreen = () => {
         });
       });
 
-      // Sort slots by time for each day
       Object.keys(weeklySchedule).forEach(day => {
         weeklySchedule[day].sort((a, b) => a.startTime.localeCompare(b.startTime));
       });
@@ -76,7 +84,7 @@ const TimetableScreen = () => {
 
   useEffect(() => {
     fetchSchedule();
-  }, [teacherData]);
+  }, [teacherData, isAdmin]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -86,7 +94,7 @@ const TimetableScreen = () => {
   const handleDelete = async (classId: string, className: string) => {
     Alert.alert(
       'Delete Class',
-      `Are you sure you want to delete ${className}? This will remove all scheduled sessions for this class.`,
+      `Are you sure you want to delete ${className}? This will remove all scheduled times for this class.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { 
@@ -116,9 +124,17 @@ const TimetableScreen = () => {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <View>
-          <Text style={styles.title}>Weekly Timetable</Text>
-          <Text style={styles.subtitle}>ACADEMIC SESSION PLANNER</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <TouchableOpacity 
+            style={styles.backButton} 
+            onPress={() => navigation.goBack()}
+          >
+            <ChevronLeft size={24} color="#64748B" />
+          </TouchableOpacity>
+          <View>
+            <Text style={styles.title}>Schedule</Text>
+            <Text style={styles.subtitle}>WEEKLY CLASSES</Text>
+          </View>
         </View>
         <TouchableOpacity style={styles.headerAddButton} onPress={() => navigation.navigate('ManageClass', {})}>
            <Plus size={20} color="#fff" />
@@ -142,7 +158,7 @@ const TimetableScreen = () => {
               </View>
 
               {daySlots.length === 0 ? (
-                <Text style={styles.noClasses}>No sessions scheduled</Text>
+                <Text style={styles.noClasses}>No classes found.</Text>
               ) : (
                 daySlots.map((slot, idx) => (
                   <View key={`${slot.id}-${idx}`} style={styles.slotCard}>
@@ -161,7 +177,7 @@ const TimetableScreen = () => {
                       </View>
                       <View style={styles.locationContainer}>
                         <MapPin size={12} color="#94A3B8" />
-                        <Text style={styles.locationText}>{slot.room}</Text>
+                        <Text style={styles.locationText}>{slot.room}{isAdmin ? ` • ${slot.teacherName}` : ''}</Text>
                       </View>
                     </View>
 
@@ -217,6 +233,12 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '900',
   },
+  backButton: {
+    padding: 8,
+    borderRadius: 12,
+    backgroundColor: '#F1F5F9',
+    marginRight: 16,
+  },
   title: {
     fontSize: 22,
     fontWeight: '900',
@@ -227,6 +249,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#6366F1',
     letterSpacing: 2,
+    textTransform: 'uppercase',
     marginTop: 4,
   },
   scrollContent: {
@@ -253,9 +276,11 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   noClasses: {
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: '700',
     color: '#94A3B8',
-    fontStyle: 'italic',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
     marginLeft: 4,
   },
   slotCard: {
@@ -266,11 +291,11 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#F1F5F9',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.02,
-    shadowRadius: 5,
-    elevation: 2,
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.04,
+    shadowRadius: 12,
+    elevation: 3,
     alignItems: 'center',
   },
   timeBox: {

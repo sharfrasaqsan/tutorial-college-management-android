@@ -9,13 +9,15 @@ import {
   Alert,
   SafeAreaView
 } from 'react-native';
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { Check, X, Users, ChevronLeft, Calendar, Loader2 } from 'lucide-react-native';
+import { completeAcademicSession } from '../lib/sessions';
+import { Check, X, Users, ChevronLeft, Calendar as CalendarIcon, Loader2 } from 'lucide-react-native';
 import { useRoute, useNavigation, RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../navigation/types';
 import { Student } from '../types/models';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const MarkAttendanceScreen = () => {
   const route = useRoute<RouteProp<RootStackParamList, 'MarkAttendance'>>();
@@ -57,6 +59,35 @@ const MarkAttendanceScreen = () => {
   const handleSubmit = async () => {
     setSubmitting(true);
     try {
+      // 1. Fetch Class Data for completion protocol
+      const classSnap = await getDoc(doc(db, "classes", classId));
+      if (!classSnap.exists()) {
+        Alert.alert('Protocol Error', 'Academic unit not found in registry.');
+        setSubmitting(false);
+        return;
+      }
+      const classData = classSnap.data();
+
+      // 2. Execute Session Completion Protocol
+      const sessionResult = await completeAcademicSession({
+        id: classId,
+        name: className,
+        subject: classData.subject || "Subject",
+        grade: grade,
+        startTime: classData.schedules?.[0]?.startTime || "00:00",
+        room: classData.schedules?.[0]?.room || "Main Hall",
+        studentCount: classData.studentCount || 0,
+        sessionsPerCycle: classData.sessionsPerCycle || 8
+      }, {
+        id: teacherId,
+        name: classData.teacherName || "Teacher"
+      });
+
+      if (!sessionResult.success && !sessionResult.alreadyMarked) {
+        throw new Error(sessionResult.error || "Session completion failed");
+      }
+
+      // 3. Log Attendance Data
       await addDoc(collection(db, "attendance"), {
         classId,
         className,
@@ -65,12 +96,19 @@ const MarkAttendanceScreen = () => {
         records: attendanceData,
         createdAt: serverTimestamp()
       });
-      Alert.alert('Success', 'Attendance marked successfully', [
-        { text: 'OK', onPress: () => navigation.goBack() }
-      ]);
+
+      if (sessionResult.alreadyMarked) {
+        Alert.alert('Attendance Logged', 'Attendance record saved, but the academic session was already finalized for today.', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
+      } else {
+        Alert.alert('Success', 'Attendance and Academic Session finalized successfully.', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
+      }
     } catch (error) {
       console.error(error);
-      Alert.alert('Error', 'Failed to sync attendance');
+      Alert.alert('Process Error', 'Failed to synchronize institutional log.');
     } finally {
       setSubmitting(false);
     }
@@ -126,9 +164,15 @@ const MarkAttendanceScreen = () => {
             onPress={() => toggleStatus(s.id)}
           >
             <View style={styles.studentInfo}>
-               <View style={[styles.initialCircle, !attendanceData[s.id] && styles.absentCircle]}>
-                  <Text style={styles.initialText}>{s.name.charAt(0)}</Text>
-               </View>
+               {attendanceData[s.id] ? (
+                 <LinearGradient colors={['#6366F1', '#4F46E5']} style={styles.initialCircle}>
+                   <Text style={[styles.initialText, { color: '#fff' }]}>{s.name.charAt(0)}</Text>
+                 </LinearGradient>
+               ) : (
+                 <View style={[styles.initialCircle, styles.absentCircle]}>
+                    <Text style={styles.initialText}>{s.name.charAt(0)}</Text>
+                 </View>
+               )}
                <View>
                   <Text style={[styles.studentName, !attendanceData[s.id] && styles.absentText]}>{s.name}</Text>
                   <Text style={styles.studentSchool}>{s.schoolName}</Text>
@@ -143,13 +187,14 @@ const MarkAttendanceScreen = () => {
 
       <View style={styles.footer}>
         <TouchableOpacity 
-          style={styles.submitButton} 
           onPress={handleSubmit}
           disabled={submitting || students.length === 0}
         >
-          {submitting ? <ActivityIndicator color="#fff" /> : (
-            <Text style={styles.submitButtonText}>AUTHORIZE ATTENDANCE</Text>
-          )}
+          <LinearGradient colors={['#0F172A', '#1E293B']} style={styles.submitButton}>
+            {submitting ? <ActivityIndicator color="#fff" /> : (
+              <Text style={styles.submitButtonText}>COMMIT COMPLIANCE LOG</Text>
+            )}
+          </LinearGradient>
         </TouchableOpacity>
       </View>
     </View>

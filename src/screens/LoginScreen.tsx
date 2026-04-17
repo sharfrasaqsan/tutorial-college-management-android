@@ -13,7 +13,8 @@ import {
 } from 'react-native';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { LogIn } from 'lucide-react-native';
+import { LogIn, Shield } from 'lucide-react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const LoginScreen = () => {
   const [email, setEmail] = useState('');
@@ -38,61 +39,80 @@ const LoginScreen = () => {
   };
 
   return (
-    <KeyboardAvoidingView 
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
-    >
-      <View style={styles.inner}>
-        <View style={styles.header}>
-          <Text style={styles.logo}>🏫</Text>
-          <Text style={styles.title}>Tutorial College</Text>
-          <Text style={styles.subtitle}>Teacher Portal Mobile</Text>
-        </View>
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#0F172A', '#1E293B']}
+        style={StyleSheet.absoluteFillObject}
+      />
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
+        <View style={styles.inner}>
+          <View style={styles.header}>
+            <View style={styles.logoContainer}>
+              <LinearGradient
+                colors={['#6366F1', '#4F46E5']}
+                style={styles.logoGradient}
+              >
+                <Shield size={40} color="#fff" />
+              </LinearGradient>
+            </View>
+            <Text style={styles.title}>SMART ACADEMY</Text>
+            <Text style={styles.subtitle}>INSTITUTIONAL ACCESS</Text>
+          </View>
 
-        <View style={styles.form}>
-           <Text style={styles.label}>EMAIL ADDRESS</Text>
-           <TextInput
-             style={styles.input}
-             placeholder="teacher@example.com"
-             value={email}
-             onChangeText={setEmail}
-             autoCapitalize="none"
-             keyboardType="email-address"
-           />
+          <View style={styles.form}>
+             <Text style={styles.label}>INSTITUTIONAL EMAIL</Text>
+             <TextInput
+               style={styles.input}
+               placeholder="faculty@smartacademy.edu"
+               placeholderTextColor="#94A3B8"
+               value={email}
+               onChangeText={setEmail}
+               autoCapitalize="none"
+               keyboardType="email-address"
+             />
 
-           <Text style={styles.label}>PASSWORD</Text>
-           <TextInput
-             style={styles.input}
-             placeholder="••••••••"
-             value={password}
+             <Text style={styles.label}>SECURITY KEY</Text>
+             <TextInput
+               style={styles.input}
+               placeholder="••••••••"
+               placeholderTextColor="#94A3B8"
+               value={password}
              onChangeText={setPassword}
              secureTextEntry
            />
 
-           <TouchableOpacity 
-             style={styles.button} 
-             onPress={handleLogin}
-             disabled={loading}
-           >
-             {loading ? <ActivityIndicator color="#fff" /> : (
-               <View style={styles.buttonContent}>
-                 <LogIn size={18} color="#fff" strokeWidth={3} />
-                 <Text style={styles.buttonText}>SIGN IN TO PORTAL</Text>
-               </View>
-             )}
-           </TouchableOpacity>
-        </View>
+             <TouchableOpacity 
+               onPress={handleLogin}
+               disabled={loading}
+             >
+               <LinearGradient
+                   colors={['#4F46E5', '#3730A3']}
+                   style={styles.button}
+               >
+                 {loading ? <ActivityIndicator color="#fff" /> : (
+                   <View style={styles.buttonContent}>
+                     <LogIn size={18} color="#fff" strokeWidth={3} />
+                     <Text style={styles.buttonText}>AUTHENTICATE</Text>
+                   </View>
+                 )}
+               </LinearGradient>
+             </TouchableOpacity>
+          </View>
 
-        <Text style={styles.footer}>© 2026 Tutorial College Management</Text>
-      </View>
-    </KeyboardAvoidingView>
+          <Text style={styles.footer}>SMART ACADEMY CLOUD ARCHITECTURE © 2026</Text>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0F172A',
   },
   inner: {
     flex: 1,
@@ -104,67 +124,73 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 48,
   },
-  logo: {
-    fontSize: 48,
-    marginBottom: 16,
+  logoContainer: {
+    marginBottom: 20,
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  logoGradient: {
+    width: 80,
+    height: 80,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   title: {
     fontSize: 32,
     fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -1,
+    color: '#FFF',
+    letterSpacing: -0.5,
   },
   subtitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '900',
     color: '#6366F1',
-    marginTop: 4,
-    letterSpacing: 2,
+    marginTop: 8,
+    letterSpacing: 3,
     textTransform: 'uppercase',
   },
   form: {
     width: '100%',
     maxWidth: 400,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: '#1E293B',
     padding: 24,
     borderRadius: 32,
-    shadowColor: '#6366F1',
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowOpacity: 0.3,
+    shadowRadius: 30,
+    elevation: 20,
     borderWidth: 1,
-    borderColor: '#F1F5F9',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   label: {
     fontSize: 10,
     fontWeight: '900',
     color: '#94A3B8',
-    letterSpacing: 1.5,
-    marginBottom: 8,
+    letterSpacing: 2,
+    marginBottom: 10,
     marginLeft: 4,
   },
   input: {
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#0F172A',
     borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 16,
+    borderColor: '#334155',
+    padding: 18,
     borderRadius: 16,
     fontSize: 16,
     fontWeight: '700',
-    marginBottom: 20,
-    color: '#1E293B',
+    marginBottom: 24,
+    color: '#F8FAFC',
   },
   button: {
-    backgroundColor: '#4F46E5',
     padding: 20,
     borderRadius: 16,
     alignItems: 'center',
-    marginTop: 8,
-    shadowColor: '#4F46E5',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    marginTop: 10,
   },
   buttonContent: {
     flexDirection: 'row',
@@ -174,15 +200,16 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: '900',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
     marginLeft: 10,
   },
   footer: {
-    marginTop: 48,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#94A3B8',
-    letterSpacing: 1,
+    position: 'absolute',
+    bottom: 40,
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 2,
   }
 });
 

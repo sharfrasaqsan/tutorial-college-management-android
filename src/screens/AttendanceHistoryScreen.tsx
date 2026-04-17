@@ -11,8 +11,9 @@ import {
 import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useAuth } from '../context/AuthContext';
-import { ClipboardCheck, Calendar, Clock, ChevronRight } from 'lucide-react-native';
+import { ClipboardCheck, Calendar as CalendarIcon, Clock, ChevronRight } from 'lucide-react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const AttendanceHistoryScreen = () => {
   const { user } = useAuth();
@@ -62,8 +63,8 @@ const AttendanceHistoryScreen = () => {
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
       <View style={styles.header}>
-        <Text style={styles.title}>Attendance Ledger</Text>
-        <Text style={styles.subtitle}>HISTORY OF SESSION CHECK-INS</Text>
+        <Text style={styles.title}>Compliance Ledger</Text>
+        <Text style={styles.subtitle}>SESSION REGISTRY LOGS</Text>
       </View>
 
       <ScrollView 
@@ -84,10 +85,10 @@ const AttendanceHistoryScreen = () => {
 
              return (
                <View key={log.id} style={styles.historyCard}>
-                  <View style={styles.dateCircle}>
-                     <Calendar size={14} color="#6366F1" />
+                  <LinearGradient colors={['#F0F9FF', '#E0F2FE']} style={styles.dateCircle}>
+                     <CalendarIcon size={14} color="#0EA5E9" />
                      <Text style={styles.dateText}>{new Date(log.date).toLocaleDateString('en-GB', { day: '2-digit', month: 'short' })}</Text>
-                  </View>
+                  </LinearGradient>
 
                   <View style={styles.cardInfo}>
                      <Text style={styles.className}>{log.className}</Text>
